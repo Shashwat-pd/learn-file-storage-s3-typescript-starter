@@ -7,6 +7,7 @@ import { type ApiConfig } from "../config";
 import type { BunRequest } from "bun";
 import { getVideo, updateVideo } from "../db/videos.ts";
 import { s3, S3Client } from "bun";
+import { argv0, stdout } from "process";
 
 export async function handlerUploadVideo(cfg: ApiConfig, req: BunRequest) {
   const MAX_UPLOAD_SIZE = 10 * 1024 * 1024 * 1024;
@@ -40,12 +41,15 @@ export async function handlerUploadVideo(cfg: ApiConfig, req: BunRequest) {
     throw new BadRequestError("Invalid format");
   }
   let fileName = randomUUID() + ".mp4";
-  const fsPath = join(cfg.assetsRoot, `${fileName}.mp4`);
+  const fsPath = join(cfg.assetsRoot, `${fileName}`);
 
   await Bun.write(fsPath, upload, { createPath: true });
-  const key = randomUUID() + ".mp4";
+  const newPath = await processVideoForFastStart(fsPath);
+
+  const ratio = await getVideoAspectRatio(fsPath);
+  const key = ratio + "/" + randomUUID() + ".mp4";
   const bucketPath = `https://${cfg.s3Bucket}.s3.${cfg.s3Region}.amazonaws.com/${key}`;
-  const file = Bun.file(fsPath);
+  const file = Bun.file(newPath);
 
   const bucketFile = S3Client.file(key, {
     ...cfg.s3Client,
@@ -56,6 +60,69 @@ export async function handlerUploadVideo(cfg: ApiConfig, req: BunRequest) {
 
   updateVideo(cfg.db, video);
   await file.delete();
+  await Bun.file(fsPath).delete();
 
   return respondWithJSON(200, null);
+}
+async function getVideoAspectRatio(filePath: string) {
+  const proc = Bun.spawn({
+    cmd: [
+      "ffprobe",
+      "-v",
+      "error",
+      "-print_format",
+      "json",
+      "-show_streams",
+      filePath,
+    ],
+  });
+
+  await proc.exited;
+  if (proc.exitCode == 0) {
+    const output = proc.stdout.getReader();
+    const outputReader = await output.read();
+    const decoder = new TextDecoder();
+    const content = outputReader.value;
+    const str = decoder.decode(content);
+
+    const json = JSON.parse(str);
+
+    const width = json.streams[0].width;
+    const height = json.streams[0].height;
+    if (height > width) {
+      return "portrait";
+    } else if (width > height) {
+      return "landscape";
+    }
+    return "other";
+  } else {
+    throw "Error Reading Video Data";
+  }
+}
+
+async function processVideoForFastStart(inputFilePath: string) {
+  let newpath = inputFilePath + ".processed";
+  const proc = Bun.spawn({
+    cmd: [
+      "ffmpeg",
+      "-i",
+      inputFilePath,
+      "-movflags",
+      "faststart",
+      "-map_metadata",
+      "0",
+      "-codec",
+      "copy",
+      "-f",
+      "mp4",
+      newpath,
+    ],
+  });
+
+  await proc.exited;
+  if (proc.exitCode == 0) {
+    return newpath;
+  } else {
+    throw "Error Reading Video Data";
+  }
 }
