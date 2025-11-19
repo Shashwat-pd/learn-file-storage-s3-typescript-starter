@@ -5,7 +5,7 @@ import { getBearerToken, validateJWT } from "../auth";
 import { UserForbiddenError, BadRequestError } from "./errors.ts";
 import { type ApiConfig } from "../config";
 import type { BunRequest } from "bun";
-import { getVideo, updateVideo } from "../db/videos.ts";
+import { getVideo, updateVideo, type Video } from "../db/videos.ts";
 import { s3, S3Client } from "bun";
 import { argv0, stdout } from "process";
 
@@ -48,7 +48,8 @@ export async function handlerUploadVideo(cfg: ApiConfig, req: BunRequest) {
 
   const ratio = await getVideoAspectRatio(fsPath);
   const key = ratio + "/" + randomUUID() + ".mp4";
-  const bucketPath = `https://${cfg.s3Bucket}.s3.${cfg.s3Region}.amazonaws.com/${key}`;
+  //const bucketPath = `https://${cfg.s3Bucket}.s3.${cfg.s3Region}.amazonaws.com/${key}`;
+  const bucketPath = `${key}`;
   const file = Bun.file(newPath);
 
   const bucketFile = S3Client.file(key, {
@@ -62,7 +63,7 @@ export async function handlerUploadVideo(cfg: ApiConfig, req: BunRequest) {
   await file.delete();
   await Bun.file(fsPath).delete();
 
-  return respondWithJSON(200, null);
+  return respondWithJSON(200, dbVideoToSignedVideo(cfg, video));
 }
 async function getVideoAspectRatio(filePath: string) {
   const proc = Bun.spawn({
@@ -125,4 +126,19 @@ async function processVideoForFastStart(inputFilePath: string) {
   } else {
     throw "Error Reading Video Data";
   }
+}
+
+function generatePresignedURL(cfg: ApiConfig, key: string, expireTime: number) {
+  return S3Client.presign(key, { ...cfg.s3Client, expiresIn: expireTime });
+}
+
+export function dbVideoToSignedVideo(cfg: ApiConfig, video: Video) {
+  if (!video.videoURL) {
+    return video;
+  }
+  const signedVideo = {
+    ...video,
+    videoURL: generatePresignedURL(cfg, video.videoURL, 3600),
+  };
+  return signedVideo;
 }
