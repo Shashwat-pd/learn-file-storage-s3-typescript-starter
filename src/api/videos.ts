@@ -46,15 +46,15 @@ export async function handlerUploadVideo(cfg: ApiConfig, req: BunRequest) {
   await Bun.write(fsPath, upload, { createPath: true });
   const newPath = await processVideoForFastStart(fsPath);
 
-  const ratio = await getVideoAspectRatio(fsPath);
+  const ratio = await getVideoAspectRatio(newPath);
   const key = ratio + "/" + randomUUID() + ".mp4";
   //const bucketPath = `https://${cfg.s3Bucket}.s3.${cfg.s3Region}.amazonaws.com/${key}`;
-  const bucketPath = `${key}`;
+  //const bucketPath = `${key}`;
+  const bucketPath = `${cfg.s3CfDistribution}/${key}`;
   const file = Bun.file(newPath);
 
   const bucketFile = S3Client.file(key, {
     ...cfg.s3Client,
-    type: file.type,
   });
   await bucketFile.write(file, { type: file.type });
   video.videoURL = bucketPath;
@@ -63,7 +63,7 @@ export async function handlerUploadVideo(cfg: ApiConfig, req: BunRequest) {
   await file.delete();
   await Bun.file(fsPath).delete();
 
-  return respondWithJSON(200, dbVideoToSignedVideo(cfg, video));
+  return respondWithJSON(200, video);
 }
 async function getVideoAspectRatio(filePath: string) {
   const proc = Bun.spawn({
@@ -128,6 +128,7 @@ async function processVideoForFastStart(inputFilePath: string) {
   }
 }
 
+/*
 function generatePresignedURL(cfg: ApiConfig, key: string, expireTime: number) {
   return S3Client.presign(key, { ...cfg.s3Client, expiresIn: expireTime });
 }
@@ -142,3 +143,4 @@ export function dbVideoToSignedVideo(cfg: ApiConfig, video: Video) {
   };
   return signedVideo;
 }
+*/
