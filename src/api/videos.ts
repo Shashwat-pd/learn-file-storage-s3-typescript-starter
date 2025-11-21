@@ -46,17 +46,20 @@ export async function handlerUploadVideo(cfg: ApiConfig, req: BunRequest) {
   await Bun.write(fsPath, upload, { createPath: true });
   const newPath = await processVideoForFastStart(fsPath);
 
-  const ratio = await getVideoAspectRatio(newPath);
+  const ratio = await getVideoAspectRatio(fsPath);
   const key = ratio + "/" + randomUUID() + ".mp4";
   //const bucketPath = `https://${cfg.s3Bucket}.s3.${cfg.s3Region}.amazonaws.com/${key}`;
   //const bucketPath = `${key}`;
-  const bucketPath = `${cfg.s3CfDistribution}/${key}`;
+  const bucketPath = `https://${cfg.s3CfDistribution}/${key}`;
   const file = Bun.file(newPath);
+  console.log(file);
 
   const bucketFile = S3Client.file(key, {
     ...cfg.s3Client,
+    type: upload.type,
   });
-  await bucketFile.write(file, { type: file.type });
+  await bucketFile.write(file, { type: "video/mp4" });
+  console.log(bucketFile);
   video.videoURL = bucketPath;
 
   updateVideo(cfg.db, video);
